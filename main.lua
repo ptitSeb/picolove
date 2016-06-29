@@ -151,6 +151,8 @@ local __pico_music = {}
 
 local __pico_current_music = nil
 
+local __hack_pget = nil
+
 local currentDirectory = '/'
 local fontchars = "abcdefghijklmnopqrstuvwxyz\"'`-_/1234567890!?[](){}.,;:<>+=%#^*~ "
 
@@ -866,6 +868,8 @@ function load_p8(filename)
 	end)
 	-- rewrite assignment operators
 	lua = lua:gsub("(%S+)%s*([%+-%*/%%])=","%1 = %1 %2 ")
+	--special patch for if something then someotherthing -- comment end
+	lua = lua:gsub("if([^\n]*)then([^\n]*)%-%-[^\n]* end","if%1then%2 end")
 
 	log("finished loading cart",filename)
 
@@ -1347,8 +1351,9 @@ end
 function pget(x,y)
 	x=x-__pico_camera_x
 	y=y-__pico_camera_y
-	if x>=0 and x<__pico_resolution[1] and y>=0 and y<__pico_resolution[2] then
-		local r, g, b, a=__screen:newImageData():getPixel(flr(x), flr(y))
+	if x>=0 and x<128 and y>=0 and y<256 then
+		if __hack_pget == nil then __hack_pget=__screen:newImageData() end
+		local r, g, b, a=__hack_pget:getPixel(flr(x), flr(y))
 		return r
 	end
 	warning(string.format("pget out of screen %d, %d", x, y))
@@ -1359,7 +1364,10 @@ function pset(x,y,c)
 	if c then
 		color(c)
 	end
-	love.graphics.point(flr(x), flr(y))
+	if x>=0 and x<128 and y>=0 and y<256 then
+		love.graphics.point(flr(x), flr(y))
+		if __hack_pget then __hack_pget:setPixel(flr(x), flr(y), c, 0, 0, 255) end
+	end
 end
 
 function sget(x,y)
@@ -1378,8 +1386,8 @@ function sset(x,y,c)
 	y=flr(y)
 	c=flr(c or 0)%16
 	if x>=0 and x<128 and y>=0 and y<128 then
-		pico8.spritesheet_data:setPixel(x, y, c, 0, 0, 255)
-		pico8.spritesheet:refresh()
+		__pico_spritesheet_data:setPixel(x, y, c, 0, 0, 255)
+		__pico_spritesheet:refresh()
 	end
 end
 
@@ -1425,6 +1433,7 @@ function fset(n,f,v)
 end
 
 function flip()
+	if __hack_pget then __hack_pget=nil end
 	flip_screen()
 	love.timer.sleep(frametime)
 end
@@ -1973,6 +1982,7 @@ function spr(n,x,y,w,h,flip_x,flip_y)
 	if not q then
 		log('missing quad', n)
 	end
+	if __hack_pget then __hack_pget=nil end
 	love.graphics.draw(__pico_spritesheet, q,
 		flr(x)+(w*8*(flip_x and 1 or 0)),
 		flr(y)+(h*8*(flip_y and 1 or 0)),
@@ -1989,6 +1999,7 @@ function sspr(sx,sy,sw,sh,dx,dy,dw,dh,flip_x,flip_y)
 -- flip_y=true to flip vertically
 	dw=dw or sw
 	dh=dh or sh
+	if __hack_pget then __hack_pget=nil end
 	-- FIXME: cache this quad
 	local q=love.graphics.newQuad(sx, sy, sw, sh, __pico_spritesheet:getDimensions())
 	love.graphics.setShader(__sprite_shader)
@@ -2309,6 +2320,7 @@ function poke(addr, val)
 	elseif addr<0x6000 then
 		-- FIXME: Unused but memory
 	elseif addr<0x8000 then
+		if __hack_pget then __hack_pget=nil end
 		addr=addr-0x6000
 		local lo=val%16
 		local hi=flr(val/16)
