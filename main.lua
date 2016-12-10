@@ -206,7 +206,7 @@ function love.load(argv)
   	end
 	osc[4] = function(x)
 		-- pulse
-		return (x%1 < 0.3 and 1 or -1) * 1/3
+		return (x%1 < 0.3125 and 1 or -1) * 1/3
 	end
 	osc[5] = function(x)
 		-- tri/2
@@ -266,9 +266,9 @@ function love.load(argv)
 	love.graphics.setPointSize(1)
 	love.graphics.setLineWidth(1)
 
-	love.graphics.origin()
-	love.graphics.setCanvas(__screen)
-	restore_clip()
+	--love.graphics.origin()
+	--love.graphics.setCanvas(__screen)
+	--restore_clip()
 
 	__draw_palette = {}
 	__display_palette = {}
@@ -325,11 +325,11 @@ vec4 effect(vec4 color, Image texture, vec2 texture_coords, vec2 screen_coords) 
 	pal()
 
 	-- load the cart
-	clip()
-	camera()
-	pal()
-	palt()
-	color(6)
+	--clip()
+	--camera()
+	--pal()
+	--palt()
+	--color(6)
 
 	_load(argv[2] or 'nocart.p8')
 	run()
@@ -426,6 +426,11 @@ function new_sandbox()
 		-- deprecated pico-8 function aliases
 		mapdraw=map
 	}
+end
+
+function magiclines(s)
+        if s:sub(-1)~="\n" then s=s.."\n" end
+        return s:gmatch("(.-)\n")
 end
 
 function load_p8(filename)
@@ -575,8 +580,33 @@ function load_p8(filename)
 		log('version',version)
 		log('codelen',codelen)
 		if version == 0 then
-			lua = code
-		elseif version == 1 or version == 5 or version == 7 then
+			local first = 0
+			local filter = string.char(32, 101, 110, 100)
+			local isreturn = 0
+			for line in magiclines(code) do
+			--for line in string.gmatch(code,'[^\r\n]+') do -- this one doesn't keep blank lines 
+				if first == 0 then
+					lua = ""
+				else
+					if string.byte(line, 1) == 0 then line="" end
+					if line ~= filter then
+						local trimmed = line:gsub("^%s*(.-)%s*$", "%1")
+						if isreturn == 1 then
+							if trimmed ~= 'end' and trimmed ~= 'else' then
+								lua = lua .. 'end' .. '\n' --force insert a "end" 
+							end
+						end
+						lua = lua .. line .. '\n'
+						if trimmed == 'return' then
+							isreturn = 1
+						else
+							isreturn = 0
+						end
+					end
+				end
+				first = first + 1
+			end
+		elseif version == 1 or version == 5 or version == 7 or version == 8 then
 			-- decompress code
 			local mode = 0
 			local copy = nil
@@ -614,6 +644,12 @@ function load_p8(filename)
 						copy = byte
 					end
 				end
+			end
+			if version == 8 then
+				lua = string.gsub(lua, "\\x97", "(X)")	-- clean up some special caracters...
+				lua = string.gsub(lua, "\\x8e", "(.)")
+				lua = string.gsub(lua, "\\x8b", "(<)")
+				lua = string.gsub(lua, "\\x91", "(>)")
 			end
 --log(string.format("code = %s", lua))
 		else
@@ -870,6 +906,8 @@ function load_p8(filename)
 	lua = lua:gsub("(%S+)%s*([%+-%*/%%])=","%1 = %1 %2 ")
 	--special patch for if something then someotherthing -- comment end
 	lua = lua:gsub("if([^\n]*)then([^\n]*)%-%-[^\n]* end","if%1then%2 end")
+	--special patch for if(something)_variable....end
+	lua = lua:gsub("if(%([^\n]-%))_([^\n]*)end","if %1 then %2 end")
 
 	log("finished loading cart",filename)
 
@@ -897,11 +935,7 @@ end
 function love.resize(w,h)
 	love.graphics.clear()
 	-- adjust stuff to fit the screen
-	if w > h then
-		scale = h/(__pico_resolution[2]+ypadding*2)
-	else
-		scale = w/(__pico_resolution[1]+xpadding*2)
-	end
+	scale=math.max(math.min(w/__pico_resolution[1], h/__pico_resolution[2]), 1)
 end
 
 function love.run()
@@ -1105,14 +1139,14 @@ function update_audio(time)
 					elseif ch.fx == 6 then
 						-- fast appreggio over 4 steps
 						local off = bit.band(flr(ch.offset),0xfc)
-						local lfo = flr(ch.lfo(8)*4)
+						local lfo = flr(ch.lfo(sfx.speed <= 8 and 16 or 8)*4)
 						off = off + lfo
 						local note = sfx[flr(off)][1]
 						ch.freq = note_to_hz(note)
 					elseif ch.fx == 7 then
 						-- slow appreggio over 4 steps
 						local off = bit.band(flr(ch.offset),0xfc)
-						local lfo = flr(ch.lfo(4)*4)
+						local lfo = flr(ch.lfo(sfx.speed <= 8 and 8 or 4)*4)
 						off = off + lfo
 						local note = sfx[flr(off)][1]
 						ch.freq = note_to_hz(note)
@@ -1319,6 +1353,8 @@ function sfx(n,channel,offset)
 		for i=0,3 do
 			if __pico_audio_channels[i].sfx == nil then
 				channel = i
+			elseif __pico_audio_channels[i].sfx==n then
+				channel = i
 			end
 		end
 	end
@@ -1519,6 +1555,7 @@ function restore_camera()
 end
 
 function circ(ox,oy,r,col)
+	if __hack_pget then __hack_pget=nil end
 	col = col or __pico_color
 	color(col)
 	ox = flr(ox)
@@ -1566,6 +1603,7 @@ function _horizontal_line(lines,x0,y,x1)
 end
 
 function circfill(cx,cy,r,col)
+	if __hack_pget then __hack_pget=nil end
 	col = col or __pico_color
 	color(col)
 	cx = flr(cx)
@@ -1623,6 +1661,7 @@ function help()
 end
 
 function line(x0,y0,x1,y1,col)
+	if __hack_pget then __hack_pget=nil end
 	col = col or __pico_color
 	color(col)
 
@@ -1838,12 +1877,14 @@ function mkdir(name)
 end
 
 function rect(x0,y0,x1,y1,col)
+	if __hack_pget then __hack_pget=nil end
 	col = col or __pico_color
 	color(col)
 	love.graphics.rectangle("line",flr(x0)+1,flr(y0)+1,flr(x1-x0),flr(y1-y0))
 end
 
 function rectfill(x0,y0,x1,y1,col)
+	if __hack_pget then __hack_pget=nil end
 	if col then
 		color(col)
 	end
